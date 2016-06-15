@@ -1,0 +1,397 @@
+golang介绍
+
+技术部计费组 江小兵
+popo xbjiang
+
+@s7v7nislands
+
+* 主要内容
+
+- 并发模型回顾
+- 为什么选择golang
+- 为什么golang可以支持大并发
+- 为什么golang性能好
+- 使用时的注意事项
+- 其他
+
+* 后台开发
+
+怎样提供高并发，高性能的服务,对于后台服务器开发人员来应该是最关心的问题
+
+: 并发模型问题
+: c10k
+
+* c10k问题
+
+.link http://www.kegel.com/c10k.html
+
+: 每个后台程序员应该都看过这篇文章
+: 如果你没有看过，只能说明你很年轻
+
+* c10k问题已经成为过去...
+
+: c100k
+
+* 看前辈们是怎么处理网络请求
+
+: 一个进程的话，每次只能处理一个请求，在处理这个请求的时候，别的请求到来
+: 也只能在操作系统排队等待处理
+
+* 多进程
+
+当有网络请求时fork子进程来处理
+
+.link https://www.w3.org/Daemon/ CERN httpd
+
+问题
+- fork开销
+- context switch
+- flush TLB
+- process scheduler
+
+: 为什么这么做并发不高?
+: context switch的时候要保存和恢复大量寄存器
+: flush TLB清空了虚拟地址到物理地址的映射
+: 进程多对调度也有影响
+: 如果是CGI的话还要fork一次
+
+* 进程池
+
+－ prefork
+
+: 减少了每次fork的开销
+: 固定的进程数反而使系统更稳定
+
+* 多线程
+
+比起多进程，有下面的优点:
+- share memmory space
+- faster create
+- faster switch
+
+缺点
+- thread safe code
+
+: 在linux下进程和线程是没有本质区别的
+
+* 线程池
+
+同理，减少不必要的开销
+
+: 还是没有高并发
+
+* event driven
+
+- select/poll
+- epoll
+- kqueue
+- iocp
+
+: io复用
+: 多进程，多线程都可以使用这些
+: 关键是接受请求后,处理请求的执行模型不同
+
+优点
+- no context switch
+- low cpu
+- low memory
+
+缺点
+- callback
+- 不能有block的操作
+- 不能充分利用多核
+
+: callback会使代码很难读懂和维护
+
+* 那怎样才能做的高并发，高性能呢
+
+把前面的模型组合一下
+- apache
+- nginx
+
+* apache
+
+- prefork
+- worker
+- event
+
+* nginx
+
+- 多进程＋event driven
+
+* 其他问题
+
+前面都是完全针对网络服务，如果涉及到cpu密集的操作或者有很多block的操作的话？
+
+: 性能下降
+
+* 我们怎么解决这个问题
+
+* eserver + gas
+
+- eserver,使用libevent开发，主要用来请求和排队
+- gas,python开发的多线程后台程序,处理逻辑业务
+
+: 这个不就是前面讲的模型组合吗？ 应该很好的解决并发和性能问题吧
+: 实际上还是有问题的，我们来看看后台的python程序
+
+* python
+
+优点
+- 动态语言
+- 代码易读
+- 编码效率高
+- 丰富的标准库和第三方库
+
+缺点
+- 运行效率低
+- GIL
+
+: 没有jit的支持
+: stackless
+: pypy,pyston
+: gevent
+
+: 公司使用python很多,大家对python都比较了解
+: 这里对我们影响最大的是GIL，线程多了之后性能下降很快
+
+* eserver + 多进程
+
+把不同指令配置到不同进程，减少每个进程的线程数，分离io和cpu密集的业务，效果明显好了很多。
+
+* 问题
+
+- 重构问题
+    - 动态语言
+- 配置和维护都复杂
+    - 运行环境的部署
+
+: mypy
+: pip
+: vagrant, vm
+: docker
+: puppet,chef,ansible,salt
+
+* gevent
+
+尝试使用gevent
+- 协程+event driven
+- 同步的方式来写代码
+- 第三方库兼容性问题
+
+* golang
+
+- 语法简单,容易上手
+- 静态语言,编译速度也很快
+- 性能好，能充分利用多核
+- 语言内置支持并发
+- 支持垃圾回收
+- 丰富的标准库支持
+- 静态编译,方便部署
+
+: 语法极其简单，只有25个关键字
+: 现在编译速度越来越慢了，还在即将发布的golang1.7，编译速度有了很大的提升
+: 编译完了只有一个静态文件非常方便部署
+
+* Hello World!
+
+.play code/hello.go
+
+* golang是怎么实现高并发和高性能的呢
+
+: 大家应该在网上看到很多文章说golang的并发能力了
+
+* goroutine
+
+goroutine: 简单的认为用户层的线程
+runtime实现了自己goroutine的调度器,goroutine运行在系统的thread上面
+
+- goroutine生成开销很低
+- goroutine之间的context switch开销也很低
+
+* go语句
+
+调用函数分配数据结构G，申请stack,进入scheduler等待调度
+
+: go tool compile -S -N go.go
+: runtime.newproc
+
+* context switch
+
+在用户层切换，不用系统调用，只保存少量的运行环境
+- register
+- stack
+
+* 例子
+
+.play code/goroutine.go
+
+: goroutine没有返回，所以panic的时候不处理的话整个程序都挂掉了
+
+* 上面只是快速创建goroutine，那是怎么做的高并发的呢
+
+* stack
+
+每个运行的对象都运行stack来运行
+
+* process
+
+.image image/guard-page.png
+
+* thread
+.image image/threads.png
+
+- ulimit -s
+- 默认8MB
+
+* goroutine
+.image image/stack-growth.png
+
+- 2k
+- copy stack
+
+: _StackMin = 2048
+
+在函数入口检查stack够不够大
+
+: runtime.morestack()
+
+* 高性能，充分利用多核
+
+* scheduler
+
+.image image/in-motion.jpg
+
+golang1.5开始默认GOMAXPROCS等于内核数
+
+* scheduler
+
+.image image/syscall.jpg
+
+* 这种对于文件操作和普通的syscall有用
+并发的程度没那么大
+golang中允许的最大线程数是10000，超过了就直接panic
+
+: thread生成之后不会退出，都cache了
+: 有没有并发量很大block操作，network io, timer
+
+* 考虑另外两种常用的情况
+
+- network io
+- timer
+
+* network io
+
+runtime集成io复用
+
+* timer
+
+- heap
+
+: libevent类似
+
+* 强大的runtime
+
+- 高并发
+- 高性能
+- 代码可读性
+
+* gc
+
+并发回收算法，延迟很低
+
+: 对我们影响不大
+
+* golang其它特性
+
+- no class
+- no generic
+- interface
+
+* 坑
+
+－ 包管理
+-  type is not thread safe
+
+: go1.6开始正式支持vendor
+: sync package
+
+* glibc bug
+ (CVE-2013-7423) - getaddrinfo() writes DNS queries to random file descriptors under high load (CVE-2013-7423)
+
+: netgo
+
+* database字段为null
+
+数据库字段和程序要对应，如果没有对应出现字段允许为null的情况，程序会挂掉
+
+: python可以自己解析成None
+
+* json 
+
+String values encode as JSON strings coerced to valid UTF-8, replacing invalid bytes with the Unicode replacement rune.
+The angle brackets "<" and ">" are escaped to "\u003c" and "\u003e" to keep some browsers from misinterpreting JSON output as HTML.
+Ampersand "&" is also escaped to "\u0026" for the same reason.
+
+* json
+
+.play code/json.go
+
+: LPC自己实现json解析时候的问题
+
+* http header
+
+golang 1.6开始对http/1.1的头进行严格检查必须要有Head
+如果没有传Host，会返回错误
+
+: LPC实现http client的问题
+
+* 工具
+
+- gofmt
+- goimport
+- go vet
+- golint
+- gometalinter
+
+: 代码风格
+: 检查一些常用的错误
+
+* vim-go
+.link https://github.com/fatih/vim-go vim-go
+
+* go -race
+
+.play code/race.go
+
+go run -race race.go
+
+* go tool pprof
+
+- go tool pprof
+- go-torch
+
+demo
+
+: cd /Users/s7v7nislands/source/git/FlameGraph
+: http://127.0.0.1:8080/debug/pprof/
+: ab -c 100 -n 100 'http://127.0.0.1:8080/'
+
+* go test
+
+: cd /Users/s7v7nislands/source/gocode/src/demo
+: go test .
+: go test -bench .
+: go test -coverprofile=cover.out
+: go tool cover -html=cover.out
+
+* cross compile
+
+demo
+
+* 学习资料
+
+.link https://golang.org/doc/effective_go.html
+.link https://github.com/golang/go/wiki/CodeReviewComments
+
+* 总结
